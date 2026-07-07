@@ -5,11 +5,12 @@ from pathlib import Path
 import cdflib
 import cdflib.xarray
 from multiprocessing import Pool
-from PLHRfilter import *
-from attenuateVLFstations import *
-from removepeakvalues import *
+from .PLHRfilter import *
+from .attenuateVLFstations import *
+from .removepeakvalues import *
 import struct as st
 import scipy as sci
+import scipy.signal
 import xarray as xr
 
 def read_pwing_data(fpath):
@@ -146,8 +147,9 @@ def save_to_cdf(out_path, times, freq, BSUM, ell, tau, Dp2, Dl2, Dc2, station, f
                 "FIELDNAM": "BSUM",
                 "VAR_TYPE": "data",
                 "UNITS": "V^2/Hz",
-                "FILLVAL": np.nan,
-                "DEPEND_0": "time",
+                "FILLVAL": -1e31,
+                "DEPEND_0": "Epoch",
+                "DEPEND_1": "Frequency",
                 "DISPLAY_TYPE": "spectrogram",
                 "VALIDMIN": 0.0,
                 "VALIDMAX": float(np.nanmax(BSUM)),
@@ -161,11 +163,12 @@ def save_to_cdf(out_path, times, freq, BSUM, ell, tau, Dp2, Dl2, Dc2, station, f
             coords={"freq": freq, "time": times},
             attrs={
                 "CATDESC": "Ellipticity",
-                "FIELDNAM": "Ellip.",
+                "FIELDNAM": "ELL",
                 "VAR_TYPE": "data",
-                "UNITS": "1",
-                "FILLVAL": np.nan,
-                "DEPEND_0": "time",
+                "UNITS": "none",
+                "FILLVAL": -1e31,
+                "DEPEND_0": "Epoch",
+                "DEPEND_1": "Frequency",
                 "DISPLAY_TYPE": "spectrogram",
                 "VALIDMIN": -1.0,
                 "VALIDMAX": 1.0,
@@ -179,11 +182,12 @@ def save_to_cdf(out_path, times, freq, BSUM, ell, tau, Dp2, Dl2, Dc2, station, f
             coords={"freq": freq, "time": times},
             attrs={
                 "CATDESC": "Tau angle",
-                "FIELDNAM": "Tau",
+                "FIELDNAM": "TAU",
                 "VAR_TYPE": "data",
                 "UNITS": "deg",
-                "FILLVAL": np.nan,
-                "DEPEND_0": "time",
+                "FILLVAL": -1e31,
+                "DEPEND_0": "Epoch",
+                "DEPEND_1": "Frequency",
                 "DISPLAY_TYPE": "spectrogram",
                 "VALIDMIN": 0.0,
                 "VALIDMAX": 180.0,
@@ -199,14 +203,16 @@ def save_to_cdf(out_path, times, freq, BSUM, ell, tau, Dp2, Dl2, Dc2, station, f
                 "CATDESC": "Degree of polarization",
                 "FIELDNAM": "DOP",
                 "VAR_TYPE": "data",
-                "UNITS": "1",
-                "FILLVAL": np.nan,
-                "DEPEND_0": "time",
+                "UNITS": "none",
+                "FILLVAL": -1e31,
+                "DEPEND_0": "Epoch",
+                "DEPEND_1": "Frequency",
                 "DISPLAY_TYPE": "spectrogram",
                 "VALIDMIN": 0.0,
                 "VALIDMAX": 1.0,
                 "FORMAT": "F6.3",
-                "SCALETYP": "linear"
+                "SCALETYP": "linear",
+                "LABELAXIS": "DOP"
             },
         ),
     },
@@ -230,7 +236,7 @@ def save_to_cdf(out_path, times, freq, BSUM, ell, tau, Dp2, Dl2, Dc2, station, f
             dims="time",
             attrs={
                 "CATDESC": "Time tags (UTC)",
-                "FIELDNAM": "Time",
+                "FIELDNAM": "Epoch",
                 "VAR_TYPE": "support_data",
                 "UNITS": "ms",
                 "FILLVAL": -1e31,
@@ -239,10 +245,22 @@ def save_to_cdf(out_path, times, freq, BSUM, ell, tau, Dp2, Dl2, Dc2, station, f
         ),
     },
     attrs={
-        "station": station,
-        "station_CATDESC": "Station Name",
-        "station_FIELDNAM": "Station",
-        "fs": fs
+        "Station": station,
+        "Sampling_frequency": fs,
+        "Project": "PBASE",
+        "Source_name": " ",
+        "Discipline": " ",
+        "Data_type": " ",
+        "Descriptor": " ",
+        "Data_version": " ",
+        "Logical_file_id": " ",
+        "PI_name": " ",
+        "PI_affiliation": " ",
+        "TEXT": "",
+        "Instrument_type": " ",
+        "Mission_group": " ",
+        "Logical_source": " ",
+        "Logical_source_description": " ",
     }
     )
 
@@ -282,7 +300,7 @@ def make_filtered_signal(ang):
         wind[0:500] = edges[0:500]
         wind[-500:] = edges[501:]
         dat = signal[s:s+nstep]
-        dat *= wind
+        dat *= wind[:len(dat)]
         #print(dat.shape)
         a = PLHRfilter(dat)
         b = attenuateVLFstations(a)
@@ -299,7 +317,7 @@ def process_single_file(ang_file):
     ell, tau, Dp2, Dl2, Dc2 = get_stokes(SM)
     tau = np.rad2deg(tau); tau += 90.; tau[np.where(tau < 0)] += 180.
     BSUM = np.real(SM[:,:,0,0] + SM[:,:,1,1])
-    out_path = f"/data/sgo/ANG/cdf/{Path(ang_file).stem}.cdf"
+    out_path = os.path.join(odir, f"{Path(ang_file).stem}.cdf")
     save_to_cdf(out_path, times, freq, BSUM, ell, tau, Dp2, Dl2, Dc2, 'ANGELI', fs)
     print(f"Processed and saved: {out_path}")
     return out_path
@@ -310,6 +328,8 @@ def process_multiple_files_parallel(ang_files, num_workers=1):
     return cdf_files
 
 # --- Running the pipeline ---
-ang_file_list = glob.glob('/data/sgo/ANG/2025/*.ANG')
-cdf_file_list = process_multiple_files_parallel(ang_file_list, num_workers=6)
-#cdf_file = process_single_ang(ang_file_list)
+idir = '/mnt/raid2/sftp/ufadata/upload/ANG 2024 -2025/241201'
+odir = '/mnt/raid2/sftp/ufadata/download/ang/2024/12/01'
+
+ang_file_list = glob.glob(os.path.join(idir, '*.ANG'))
+cdf_file_list = process_multiple_files_parallel(ang_file_list, num_workers=max(1, os.cpu_count() - 1))

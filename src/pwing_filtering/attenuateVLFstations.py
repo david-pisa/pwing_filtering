@@ -1,5 +1,6 @@
 import numpy as np
 import scipy
+import scipy.signal
 import scipy.fft as scifft
 
 def attenuateVLFstations(sig, fs=40000.):

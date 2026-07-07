@@ -1,5 +1,6 @@
 import numpy as np
 import scipy
+import scipy.signal
 import scipy.fft as scifft
 
 def PLHRfilter(sig, fs=40000.):
@@ -81,11 +82,11 @@ def PLHRfilter(sig, fs=40000.):
        
     for i, f in enumerate(PLchecklines):
         ind = np.where((Freq >= f - dF_half ) & (Freq < f + dF_half))[0]
+        if len(ind) == 0:
+            print(f'Warning: Frequency {f} out of bounds or not found.')
+            continue
         f0 = (ind - taperstep // 2)[0]
         f1 = (ind + taperstep // 2 + 1)[0]
-        if ind is None:
-            print('Error!')
-            return sig
         if debug:
             print(f'Checking line at f={f} ({f0}-{f1}) Hz')
         #checkbandpower[i, 0:(f1-f0)] = Pfft2[f0:f1]
